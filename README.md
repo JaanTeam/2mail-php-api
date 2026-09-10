@@ -119,21 +119,49 @@ $api->cancelMessage($result->id());
 ### Retrying safely
 
 If a send times out you cannot tell whether it was queued: retrying risks a duplicate
-order confirmation, not retrying risks losing it. An idempotency key removes the choice —
-a replay returns the **original** result and queues nothing:
+order confirmation, not retrying risks losing it. An idempotency key removes the choice.
+
+**The key names the attempt, not the message.** It answers *"have I already tried to send
+this?"*, not *"is this email unique?"*. So you create it once, where you decide to send,
+and pass that same value on every retry of that attempt:
 
 ```php
-$api->send($message, 'invoice-4711');
+// Generated ONCE, outside the loop — that is the whole point.
+$key = bin2hex(random_bytes(16));
+
+for ($attempt = 1; $attempt <= 3; $attempt++) {
+    try {
+        $result = $api->send($message, $key);
+        break;                                // queued — or replayed from attempt 1
+    } catch (IdempotencyInProgressException $e) {
+        sleep($attempt);                      // attempt 1 still running: same key again
+    } catch (TransportException $e) {
+        sleep($attempt * 2);                  // timeout or network error: same key again
+    }
+}
 ```
 
-Pick something stable per logical message. **An order id beats a random UUID**, which
-changes on every retry and therefore protects nothing at all.
+If attempt 1 queued the message but its response never reached you, attempt 2 returns that
+**original** result — same message id, nothing sent twice. Move the `$key =` line inside the
+loop and you have protected nothing at all: three keys, three emails.
+
+It is also not a duplicate filter over content. Sending the same message again on purpose —
+a customer asking you to resend — needs a **new** key; reusing the old one replays the first
+result and mails nothing. Two identical bodies under two different keys are two emails,
+exactly as you asked.
 
 - Replaying the key → the original result, no second message.
 - Same key, different message → `IdempotencyKeyReuseException` (a client bug, not a retry).
-- Replay while the first call is still running → `IdempotencyInProgressException`.
+- Replay while the first call is still running → `IdempotencyInProgressException`. Wait and
+  retry the *same* key; do not switch to a new one.
 - A *failed* call releases its key, so retrying after a transient error is a fresh attempt
   rather than a replay of the failure.
+- Longer than 255 characters → `IdempotencyKeyInvalidException`.
+
+Anything opaque works, as long as it is created *before* the first attempt and survives every
+retry. A UUID stored on the job row is the safest default; a natural id must name the
+*purpose* — `order-4711-confirmation`, never plain `order-4711`, which collides with the
+shipping notice for that same order and earns a reuse error.
 
 Keys are scoped per API key and kept for 7 days.
 

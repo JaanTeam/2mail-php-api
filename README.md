@@ -7,12 +7,20 @@ domains, SMTP credentials, pooled limit groups, API keys and webhooks.
 
 ## Installation
 
-Integrate this repository in your composer.json
+The package is installed straight from GitHub, so Composer needs to know where the
+repository is. From your project directory:
+
+```bash
+composer config repositories.2mail vcs https://github.com/jaanteam/2mail-php-api.git
+composer require jaanbv/2mail-php-api:^1.0
+```
+
+Or add both to your `composer.json` yourself and run `composer update jaanbv/2mail-php-api`:
 
 ```json
 {
     "require": {
-        "jaanbv/2mail-php-api": "^1.*"
+        "jaanbv/2mail-php-api": "^1.0"
     },
     "repositories": [
         {

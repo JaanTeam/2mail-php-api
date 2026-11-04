@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JaanBV\TwoMail;
 
 use JaanBV\TwoMail\Event\Event;
+use JaanBV\TwoMail\Exception\ApiKeyExpiredException;
 use JaanBV\TwoMail\Exception\BadRequestException;
 use JaanBV\TwoMail\Exception\BodyTooLargeException;
 use JaanBV\TwoMail\Exception\ConflictException;
@@ -17,6 +18,7 @@ use JaanBV\TwoMail\Exception\InvalidApiKeyException;
 use JaanBV\TwoMail\Exception\InvalidFromException;
 use JaanBV\TwoMail\Exception\InvalidHttpResponseCodeException;
 use JaanBV\TwoMail\Exception\InvalidResponseCodeException;
+use JaanBV\TwoMail\Exception\IpNotAllowedException;
 use JaanBV\TwoMail\Exception\KeyScopeMailboxException;
 use JaanBV\TwoMail\Exception\KeyScopePoolException;
 use JaanBV\TwoMail\Exception\MethodNotAllowedException;
@@ -46,6 +48,7 @@ use JaanBV\TwoMail\SentMessage\Status;
  * - messageStatus
  * - cancelMessage
  * - events
+ * - stats
  *
  * Provisioning (admin and pool keys)
  * - mailboxes / mailbox / createMailbox
@@ -59,7 +62,7 @@ use JaanBV\TwoMail\SentMessage\Status;
  *
  * What a key may call depends on its scope, and the API enforces that server-side:
  * an ADMIN key reaches everything; a POOL key is confined to its own limit group; a
- * MAILBOX key is send-only — send, status, cancel and events for its own mailbox, and
+ * MAILBOX key is send-only — send, status, cancel, events and stats for its own mailbox, and
  * ForbiddenException for the rest. There is deliberately no client-side mirror of those
  * rules: a second copy would only drift out of step with the real one.
  */
@@ -75,6 +78,7 @@ final class TwoMail
     private const API_ENDPOINT_FOR_GROUPS = 'groups';
     private const API_ENDPOINT_FOR_MESSAGES = 'messages';
     private const API_ENDPOINT_FOR_EVENTS = 'events';
+    private const API_ENDPOINT_FOR_STATS = 'stats';
     private const API_ENDPOINT_FOR_KEYS = 'keys';
     private const API_ENDPOINT_FOR_WEBHOOKS = 'webhooks';
     private const API_ENDPOINT_FOR_VALIDATION = 'validate';
@@ -101,6 +105,11 @@ final class TwoMail
         // specific
         'missing_api_key' => MissingApiKeyException::class,
         'invalid_api_key' => InvalidApiKeyException::class,
+        'api_key_expired' => ApiKeyExpiredException::class,
+        'ip_not_allowed' => IpNotAllowedException::class,
+        // A key row with a scope the API does not recognise: a server-side misconfiguration
+        // the caller cannot fix, so the generic 403 rather than a class of its own.
+        'key_scope_unknown' => ForbiddenException::class,
         'key_scope_pool' => KeyScopePoolException::class,
         'key_scope_mailbox' => KeyScopeMailboxException::class,
         'quota_exceeded' => QuotaExceededException::class,
@@ -112,6 +121,12 @@ final class TwoMail
         'idempotency_key_reuse' => IdempotencyKeyReuseException::class,
         'idempotency_in_progress' => IdempotencyInProgressException::class,
         'idempotency_key_invalid' => IdempotencyKeyInvalidException::class,
+        // invalid query input on events() / stats() — all 400, nothing to branch on
+        // beyond "fix the parameters", so they share the generic exception
+        'invalid_date' => BadRequestException::class,
+        'range_too_large' => BadRequestException::class,
+        'invalid_group_by' => BadRequestException::class,
+        'mailbox_required' => BadRequestException::class,
         // generic, derived from the HTTP status
         'bad_request' => BadRequestException::class,
         'unauthorized' => UnauthorizedException::class,
@@ -303,6 +318,31 @@ final class TwoMail
         $response = $this->doCall(self::REQUEST_TYPE_GET, self::API_ENDPOINT_FOR_EVENTS, $filters);
 
         return Event::fromArrays($response['events'] ?? []);
+    }
+
+    /**
+     * Sending statistics — the same figures as the dashboard — with totals, a series per
+     * day or per month, and this month's quota. Reachable with a mailbox key: it only ever
+     * returns the key's own mailbox (or pool).
+     *
+     * Filters:
+     * - group_by  'day' (default, at most 31 days, default this month) or
+     *             'month' (at most 24 months, default the last 12)
+     * - begin/end '2026-11-01' for days, '2026-01' for months; both inclusive
+     * - mailbox   required for an admin key, optional narrowing for a pool key
+     *
+     * Per day, figures older than the detailed logs are kept come back as null, not 0;
+     * 'available_from' then says from which day each affected metric is complete. Use
+     * group_by=month for longer periods. 'delivered', 'deferred' and 'bounced' count per
+     * recipient, 'sent' per message.
+     *
+     * @param array<string, string|int> $filters
+     * @return array{mailbox_ids: int[], group_id: ?int, group_by: string, period: array, quota: ?array, totals: array, series: array, available_from?: array}
+     * @throws TwoMailException
+     */
+    public function stats(array $filters = []) : array
+    {
+        return $this->doCall(self::REQUEST_TYPE_GET, self::API_ENDPOINT_FOR_STATS, $filters);
     }
 
     // ---------------------------------------------------------------------------------

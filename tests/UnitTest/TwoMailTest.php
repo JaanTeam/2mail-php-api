@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace UnitTest;
 
+use JaanBV\TwoMail\Exception\ApiKeyExpiredException;
+use JaanBV\TwoMail\Exception\BadRequestException;
 use JaanBV\TwoMail\Exception\ConflictingFromNameException;
 use JaanBV\TwoMail\Exception\ForbiddenException;
 use JaanBV\TwoMail\Exception\IdempotencyInProgressException;
 use JaanBV\TwoMail\Exception\IdempotencyKeyReuseException;
 use JaanBV\TwoMail\Exception\InvalidApiKeyException;
 use JaanBV\TwoMail\Exception\InvalidResponseCodeException;
+use JaanBV\TwoMail\Exception\IpNotAllowedException;
 use JaanBV\TwoMail\Exception\KeyScopeMailboxException;
 use JaanBV\TwoMail\Exception\NotFoundException;
 use JaanBV\TwoMail\Exception\QuotaExceededException;
@@ -43,6 +46,9 @@ final class TwoMailTest extends TestCase
     {
         return [
             'invalid key' => ['invalid_api_key', 401, InvalidApiKeyException::class],
+            'expired key' => ['api_key_expired', 401, ApiKeyExpiredException::class],
+            'ip not allowed' => ['ip_not_allowed', 403, IpNotAllowedException::class],
+            'broken key scope' => ['key_scope_unknown', 403, ForbiddenException::class],
             'send-only key' => ['key_scope_mailbox', 403, KeyScopeMailboxException::class],
             'limit reached' => ['quota_exceeded', 403, QuotaExceededException::class],
             'from conflict' => ['conflicting_from_name', 400, ConflictingFromNameException::class],
@@ -50,6 +56,10 @@ final class TwoMailTest extends TestCase
             'idempotency running' => ['idempotency_in_progress', 409, IdempotencyInProgressException::class],
             'generic forbidden' => ['forbidden', 403, ForbiddenException::class],
             'generic not found' => ['not_found', 404, NotFoundException::class],
+            'bad date on events/stats' => ['invalid_date', 400, BadRequestException::class],
+            'period too long' => ['range_too_large', 400, BadRequestException::class],
+            'unknown stats grouping' => ['invalid_group_by', 400, BadRequestException::class],
+            'admin stats without mailbox' => ['mailbox_required', 400, BadRequestException::class],
         ];
     }
 

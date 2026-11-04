@@ -36,7 +36,7 @@ allows — including on endpoints added after the key was issued.
 
 | Scope | What it reaches |
 |---|---|
-| **Mailbox** (send-only) | `send`, `messageStatus`, `cancelMessage`, `events` — for one mailbox. Everything else is a `403`. |
+| **Mailbox** (send-only) | `send`, `messageStatus`, `cancelMessage`, `events`, `stats` — for one mailbox. Everything else is a `403`. |
 | **Pool** | Everything inside one limit group: its mailboxes, their credentials, its webhooks and its send-only keys. |
 | **Admin** | Everything, across all pools. |
 
@@ -195,6 +195,29 @@ Filters: `event`, `mailbox`, `recipient`, `begin`, `end`, `limit` (max 300). Def
 last 7 days. A mailbox key always sees only its own mailbox — asking for another one is
 refused, not quietly ignored.
 
+## Statistics
+
+```php
+$stats = $api->stats();                                   // this month, per day
+$stats = $api->stats(['group_by' => 'month']);            // the last 12 months
+$stats = $api->stats(['begin' => '2026-10-01', 'end' => '2026-10-31']);
+
+$stats['quota'];    // ['month' => '2026-11', 'limit' => 50000, 'used' => 4050, 'left' => 45950, 'pooled' => false]
+$stats['totals'];   // sent, delivered, deferred, bounced, rejected, bounce_hard, bounce_soft,
+                    // bounce_auto_reply, opened (per day only), delivery_rate
+$stats['series'];   // the same fields per 'date' or per 'month'
+```
+
+The same figures as the dashboard, and a mailbox key can read them. Per day covers at most 31
+days and per month at most 24 months. Per day reads the detailed logs. Those are only kept
+for a limited time: a day that is older comes back as `null`, not `0`, and `available_from`
+says from which day each affected figure is complete. For anything further back, use
+`group_by=month`, which reads permanent monthly totals.
+
+`sent` counts messages; `delivered`, `deferred` and `bounced` count recipients, so a message
+with a Cc counts once and twice respectively. The `bounce_*` figures are bounce reports
+received afterwards and overlap with `bounced`: do not add them up.
+
 ## Webhooks
 
 The push side of the same log. Register a URL, keep the secret, verify every delivery:
@@ -291,6 +314,14 @@ Every exception in this library implements `TwoMailException`, and `getCode()` i
 status. `$api->lastRequestId()` returns the id 2mail logged the call under — quote it in a
 support request and the exact call can be found.
 
+Two failures come from settings you choose on the key itself, and each has its own class so
+an application can tell the operator exactly what to fix:
+
+- `ApiKeyExpiredException` — the key has passed the expiry date set in the control panel.
+  Extend it or create a new one; the message names the date.
+- `IpNotAllowedException` — the key has an IP restriction and this server's outgoing address
+  is not on it. The message names the address 2mail saw: add that one.
+
 `InvalidResponseCodeException` means the API returned an error this library does not know
 yet: the call was fine, the SDK is simply older than the API.
 
@@ -307,6 +338,7 @@ misconfigured base URL raises `InvalidHttpResponseCodeException` instead.
 - messageStatus($messageId) : Status
 - cancelMessage($messageId) : bool
 - events($filters = []) : Event[]
+- stats($filters = []) : array
 
 **Mailboxes**
 
@@ -363,6 +395,7 @@ misconfigured base URL raises `InvalidHttpResponseCodeException` instead.
 - [Copies, scheduling, idempotency, test mode](examples/example-sendMailAdvanced.php)
 - [Delivery status](examples/example-messageStatus.php)
 - [Reading events](examples/example-events.php)
+- [Sending statistics](examples/example-stats.php)
 - [Managing webhooks](examples/example-webhooks.php)
 - [Receiving a webhook](examples/example-webhookEndpoint.php)
 - [Creating a mailbox](examples/example-createMailbox.php)
